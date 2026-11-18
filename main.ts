@@ -14,6 +14,15 @@
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+
+// Fingerprint the exact bytes being handed in. The gate, the judge and any
+// later dispute all turn on this one file, so the run log carries its
+// SHA-256: what was submitted can be re-proved from the log alone, and a
+// swapped or corrupted entry.png can never pass unnoticed.
+function fingerprint(buf) {
+  return createHash('sha256').update(buf).digest('hex');
+}
 
 const MAX_BYTES = 1048576; // 1 MiB, the gate's cap
 const MAX_SIDE = 1024; // pixels, either dimension
@@ -89,6 +98,17 @@ mkdirSync(outDir, { recursive: true });
 const dest = join(outDir, 'entry.png');
 copyFileSync(source, dest);
 
+// Prove the hand-in landed whole: re-read what is now at the destination
+// and compare it with the inspected source, byte count and fingerprint
+// alike. A short write, a full disk or a racing cleanup must turn into a
+// loud failure here, not a silent invalid entry at the gate.
+const landed = readFileSync(dest);
+if (landed.length !== bytes.length || fingerprint(landed) !== fingerprint(bytes)) {
+  throw new Error(
+    `hand-in mismatch: ${dest} holds ${landed.length} bytes (sha256 ${fingerprint(landed)}), source is ${bytes.length} bytes (sha256 ${fingerprint(bytes)})`,
+  );
+}
+
 console.log(
-  `news-image-20261117: handed in ${info.kind} ${info.width}x${info.height}, ${bytes.length} bytes -> ${dest}`,
+  `news-image-20261117: handed in ${info.kind} ${info.width}x${info.height}, ${bytes.length} bytes, sha256 ${fingerprint(bytes)} -> ${dest}`,
 );
